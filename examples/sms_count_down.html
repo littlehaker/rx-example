@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title></title>
+        <style>
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                 <button class="btn-send-sms">Send SMS</button>
+            </div>
+        </div>
+        <script src="http://cdnjs.cloudflare.com/ajax/libs/rxjs/4.0.0/rx.js"></script>
+        <script src="http://cdnjs.cloudflare.com/ajax/libs/rxjs/4.0.0/rx.async.js"></script>
+        <script src="http://cdnjs.cloudflare.com/ajax/libs/rxjs/4.0.0/rx.coincidence.js"></script>
+        <script src="http://cdnjs.cloudflare.com/ajax/libs/rxjs/4.0.0/rx.binding.js"></script>
+        <script src="http://cdnjs.cloudflare.com/ajax/libs/rxjs/4.0.0/rx.time.js"></script>
+        <script src="http://cdnjs.cloudflare.com/ajax/libs/rxjs-dom/2.0.7/rx.dom.js"></script>
+
+        <script>
+            var button = document.querySelector('.btn-send-sms');
+
+            var SMS = function (opts) {
+                function notNull(val) {
+                    return val != null;
+                }
+
+                function add(a, b) {
+                    return a + b;
+                }
+
+                var COUNT_DOWN_FROM = opts.countDownFrom;
+                var ajaxSendSMS = opts.ajaxSendSMS;
+
+                var sendSMS$ = new Rx.Subject();
+                var isSMSSending$ = new Rx.BehaviorSubject(false);
+                var isCounting$ = new Rx.BehaviorSubject(false);
+                var canSend$ = isSMSSending$.combineLatest(isCounting$, function(isSMSSending, isCounting) {
+                    return !isSMSSending && !isCounting;
+                }).distinctUntilChanged();
+
+                var req$ = sendSMS$
+                    .throttle(2000)
+                    .withLatestFrom(canSend$, function (params, canSend) {
+                        if (canSend) {
+                            return params;
+                        } else {
+                            return null;
+                        }
+                    })
+                    .filter(notNull)
+                    .share();
+
+                var res$ = req$
+                    .flatMapLatest(ajaxSendSMS)
+                    .share();
+
+                req$.map(true).subscribe(isSMSSending$);
+                res$.map(false).subscribe(isSMSSending$);
+
+                var countDown$ = res$
+                    .flatMap(function() {
+                        return Rx.Observable.interval(1000)
+                            .map(-1)
+                            .startWith(COUNT_DOWN_FROM)
+                            .scan(add)
+                            .take(COUNT_DOWN_FROM + 1)
+                    })
+                    .share()
+
+                countDown$.map(function(val) {return val > 0}).subscribe(isCounting$);
+
+                return {
+                    sendSMS$: sendSMS$,
+                    countDown$: countDown$,
+                    canSend$: canSend$
+                };
+            };
+
+
+
+            // ===============
+
+            var sms = new SMS({
+                countDownFrom: 10,
+                ajaxSendSMS: function() {
+                    // fake ajax request
+                    return Rx.Observable.of({ status: 1 }).delay(500);
+                }
+            });
+
+            Rx.Observable.fromEvent(button, 'click').subscribe(sms.sendSMS$);
+
+            sms.countDown$.subscribe(function(val) {
+                button.innerHTML = val ? 'Retry after ' + val + ' s': 'Send SMS';
+            });
+
+            sms.canSend$.subscribe(function(canSend) {
+                button.disabled = !canSend;
+            });
+
+        </script>
+    </body>
+</html>
